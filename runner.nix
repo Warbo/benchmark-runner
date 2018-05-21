@@ -132,7 +132,8 @@ with rec {
       echo "Fixing MIME types" 1>&2
       find ./result -name "*.js" | while read -r F
       do
-        replace "$pre" "$post" -- "$F"
+        replace "$pre1" "$post1" -- "$F"
+        replace "$pre2" "$post2" -- "$F"
       done
 
       mv ./result "$out"
