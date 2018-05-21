@@ -119,21 +119,24 @@ with rec {
       '';
     }
     ''
-      cp -r "$run"/html    "$out"
-      chmod +w -R "$out"
+      cp -r "$run"/html ./result
+      chmod +w -R       ./result
 
       echo "Fixing up HTML" 1>&2
-      find "$out" -name "*.html" | while read -r F
+      find "$PWD/result" -name "*.html" | while read -r F
       do
         CONTENT=$(cat "$F")
         echo "$CONTENT" | "$htmlInliner" > "$F"
       done
 
       echo "Fixing MIME types" 1>&2
-      find "$out" -name "*.js" | while read -r F
+      find ./result -name "*.js" | while read -r F
       do
         replace "$pre" "$post" -- "$F"
       done
+
+      mv ./result "$out"
+      echo "Done" 1>&2
     '';
 
 };
