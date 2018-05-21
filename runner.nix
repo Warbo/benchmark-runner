@@ -22,12 +22,63 @@ with rec {
     stable      = { unsafeSkip = true; };  # Always get latest revision
   };
 
-  url = with tryEval <repo> // { env = getEnv "REPO"; };
-        if success
-           then value
-           else if env != ""
-                   then env
-                   else abort "No <repo> or REPO given";
+  given = if repo != null
+             then repo
+             else with { env = getEnv "REPO"; };
+                  if env != ""
+                     then env
+                     else abort "No repo arg or REPO env var given";
+
+  isDir = path: getAttr (baseNameOf path) (readDir (dirOf path)) == "directory";
+
+  url =
+    with pkgs;
+    with lib;
+    with rec {
+      # Predicates
+      isP = isPath given;
+      isE = isP && pathExists given;
+      isD = isE && isDir      given;
+      isN = isE && (!isD) && hasSuffix ".nix"  (toLower (toString given));
+      isJ = isE && (!isD) && hasSuffix ".json" (toLower (toString given));
+
+      # Return values (mutually exclusive)
+      lUrl = if ! isP
+                then trace "Repo ${given} isn't a path, assuming URL" [ given ]
+                else [];
+
+      lDir = if isD
+                then trace "Repo ${given} is directory, using as-is" [ given ]
+                else [];
+
+      lRaw = if isP && !(isD || isN || isJ)
+                then trace "Repo ${given} is raw file, reading contents"
+                           [ (replaceStrings [ "\n" ] [ "" ] (readFile given)) ]
+                else [];
+
+      lNix = if isN
+                then trace "Repo ${given} is Nix file, importing"
+                           [ (import given) ]
+                else [];
+
+      lJson = if isJ
+                 then trace "Repo ${given} is JSON file, parsing"
+                            [ (fromJSON (readFile given)) ]
+                 else [];
+
+      lMiss = if isP && !isE
+                 then trace "Repo ${given} is non-existent path, using as-is"
+                            [ given ]
+                 else [];
+
+      # Combine all empty return values and the one correct one
+      result = lUrl ++ lDir ++ lRaw ++ lNix ++ lJson ++ lMiss;
+    };
+    assert length result == 1 || die {
+      inherit given isP isE isD isN isJ result;
+      error = "Result should have length 1";
+    };
+    head result;
 
   run = with pkgs; runCommand "run-benchmarks-${sanitiseName url}"
     (withNix {
