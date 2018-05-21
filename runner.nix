@@ -125,7 +125,9 @@ with rec {
       echo "Fixing up HTML" 1>&2
       find "$PWD/result" -name "*.html" | while read -r F
       do
-        CONTENT=$(cat "$F")
+         CONTENT=$(cat "$F")
+             DIR=$(dirname "$F")
+        export BASE_URL="file://$DIR"
         echo "$CONTENT" | "$htmlInliner" > "$F"
       done
 
