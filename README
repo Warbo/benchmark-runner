@@ -1,0 +1,13 @@
+# ASV Benchmark Runner #
+
+The Nix derivation in `runner.nix` allows a Git repository to be benchmarked
+using Airspeed Velocity (ASV). This is useful for continuous integration, since
+normally we will only get a single Git revision (to aid reproducibility, Nix
+deletes the `.git` directory by default), whilst ASV wants access to all of the
+commits in order to benchmark them.
+
+## Usage ##
+
+The URL (remote or local) of the desired Git repository should be given either
+as a `REPO` environment variable, or as a `<repo>` parameter (set via the
+`NIX_PATH` environment variable, or via Hydra build inputs).
