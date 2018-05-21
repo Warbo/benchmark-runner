@@ -1,3 +1,5 @@
+{ repo ? null }:
+
 with builtins;
 with rec {
   pinnedConfig = (import <nixpkgs> { config = {}; }).fetchgit {
