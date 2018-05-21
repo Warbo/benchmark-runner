@@ -27,53 +27,6 @@ with rec {
                    then env
                    else abort "No <repo> or REPO given";
 
-  fixUp = with pkgs; runCommand "benchmark-results-${sanitiseName url}"
-    {
-      inherit run;
-      htmlInliner = import (fetchgit {
-        url    = http://chriswarbo.net/git/html-inliner.git;
-        rev    = "9911aa8";
-        sha256 = "0ls9hh5zq4kifc5k2zlfjccvfp3yka48076v3igr4mnf7rfrlvrk";
-      });
-      pre1  = "url: 'regressions.json',";
-      post1 = ''
-        url: 'regressions.json',
-        beforeSend: function(xhr){
-          if (xhr.overrideMimeType) {
-            xhr.overrideMimeType("application/json");
-          }
-        },
-      '';
-      pre2  = ''dataType: "json",'';
-      post2 = ''
-        dataType: "json",
-        beforeSend: function(xhr){
-          if (xhr.overrideMimeType) {
-            xhr.overrideMimeType("application/json");
-          }
-        },
-      '';
-    }
-    ''
-      mkdir "$out"
-      ln -s "$run"/results "$out"/results
-      cp -r "$run"/html    "$out"/html
-      chmod +w -R "$out/html"
-
-      echo "Fixing up HTML" 1>&2
-      find "$out"/html -name "*.html" | while read -r F
-      do
-        CONTENT=$(cat "$F")
-        echo "$CONTENT" | "$htmlInliner" > "$F"
-      done
-
-      echo "Fixing MIME types" 1>&2
-      find "$out"/html -name "*.js" | while read -r F
-      do
-        replace "$pre" "$post" -- "$F"
-      done
-    '';
-
   run = with pkgs; runCommand "run-benchmarks-${sanitiseName url}"
     (withNix {
       inherit dir;
@@ -138,5 +91,55 @@ with rec {
 
       [[ "$FOUND" -eq 1 ]] || fail "No asv.conf.json found"
     '';
+
+  results = with pkgs; runCommand "benchmark-results-${sanitiseName url}"
+    { inherit run; }
+    ''ln -s "$run/results" "$out"'';
+
+  html = with pkgs; runCommand "benchmark-pages-${sanitiseName url}"
+    {
+      inherit run;
+      htmlInliner = import (fetchgit {
+        url    = http://chriswarbo.net/git/html-inliner.git;
+        rev    = "9911aa8";
+        sha256 = "0ls9hh5zq4kifc5k2zlfjccvfp3yka48076v3igr4mnf7rfrlvrk";
+      });
+      pre1  = "url: 'regressions.json',";
+      post1 = ''
+        url: 'regressions.json',
+        beforeSend: function(xhr){
+          if (xhr.overrideMimeType) {
+            xhr.overrideMimeType("application/json");
+          }
+        },
+      '';
+      pre2  = ''dataType: "json",'';
+      post2 = ''
+        dataType: "json",
+        beforeSend: function(xhr){
+          if (xhr.overrideMimeType) {
+            xhr.overrideMimeType("application/json");
+          }
+        },
+      '';
+    }
+    ''
+      cp -r "$run"/html    "$out"
+      chmod +w -R "$out"
+
+      echo "Fixing up HTML" 1>&2
+      find "$out" -name "*.html" | while read -r F
+      do
+        CONTENT=$(cat "$F")
+        echo "$CONTENT" | "$htmlInliner" > "$F"
+      done
+
+      echo "Fixing MIME types" 1>&2
+      find "$out" -name "*.js" | while read -r F
+      do
+        replace "$pre" "$post" -- "$F"
+      done
+    '';
+
 };
-fixUp
+{ inherit html results; }
