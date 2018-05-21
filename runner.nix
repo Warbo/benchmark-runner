@@ -96,8 +96,8 @@ with rec {
       inherit run;
       htmlInliner = import (fetchgit {
         url    = http://chriswarbo.net/git/html-inliner.git;
-        rev    = "9911aa8";
-        sha256 = "0ls9hh5zq4kifc5k2zlfjccvfp3yka48076v3igr4mnf7rfrlvrk";
+        rev    = "d24cca4";
+        sha256 = "14y4w7l41j9sb7bfgjzidq89wgzhkwxvkgq5wb7qnqjfqcyygi63";
       });
       pre1  = "url: 'regressions.json',";
       post1 = ''
