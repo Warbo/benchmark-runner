@@ -94,6 +94,7 @@ with rec {
   html = with pkgs; runCommand "benchmark-pages-${sanitiseName repo}"
     {
       inherit run;
+      buildInputs = [ replace ];
       htmlInliner = import (fetchgit {
         url    = http://chriswarbo.net/git/html-inliner.git;
         rev    = "d24cca4";
