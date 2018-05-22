@@ -32,10 +32,10 @@ with rec {
 
         # Real values taken from a Thinkpad X60s
         echo "Generating machine config" 1>&2
-        asv machine --arch    "i686"                                            \
-                    --cpu     "Genuine Intel(R) CPU           L2400  @ 1.66GHz" \
-                    --machine "dummy"                                           \
-                    --os      "Linux 4.4.52"                                    \
+        asv machine --arch    "i686"                                           \
+                    --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz" \
+                    --machine "dummy"                                          \
+                    --os      "Linux 4.4.52"                                   \
                     --ram     "3093764"
 
         echo "Starting asv run" 1>&2
@@ -142,6 +142,5 @@ with rec {
       mv ./result "$out"
       echo "Done" 1>&2
     '';
-
 };
 { inherit html results; }

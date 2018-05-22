@@ -1,0 +1,86 @@
+From: Chris Warburton
+Date: Tue, 22 May 2018 13:19:13 +0100
+State: new
+Subject: Allow results to be cached
+Message-Id: <869b7ad3f5764670-0-artemis@nixos>
+
+ASV's use-case is that we have a single clone, which we use e.g. a cron
+job to 'git --pull' and 'asv run NEW'. This doesn't quite fit with our
+model, since we don't have one mutable, non-reproducible clone. Instead
+we have fresh clones and immutable outputs.
+
+Can we coerce this into caching the results, e.g. in /tmp? We could take
+the sha256 of the asv.conf.json file, make a dir like
+/tmp/asv-cache/${hash}-${projectName} and store the contents of
+.asv/results in there.
+
+We could check for the existence of this in benchmark-runner, and
+symlink the directory to our .asv/results (or whatever, read from the
+config). Hopefully that will be enough for ASV to re-use existing
+results, and add to them.
+
+An alternative would be to have one git repo, pushd to it and do a
+'git --pull && asv run NEW'. This seems like a dodgier prospect, since
+we have less reproducibility and more chance for conflicts.
+
+Thinking about it, we shouldn't symlink the results dir, since that
+would cause conflicts if Hydra ran multiple builds at once. Instead, we
+can treat the contents as append-only, i.e. we 'cp -s' the existing
+results, then 'mv' any new ones in when we're done.
+
+A question arises w.r.t. the 'benchmarks.json' file, since this will
+change whenever the set of benchmarks changes. We should try to keep old
+versions of these around, e.g. after each run we take the hash of this
+file and, if no '${hash}-benchmarks.json' exists, copy it there. This is
+slightly racy, but shouldn't be too bad. We should probably put these in
+a directory outside the (cached) '.asv/results', in case ASV gets
+confused.
+
+Note that we should include a fully copy of the results dir in our build
+output, not just symlinks (since those may break).
+
+It's a good idea to think about cached vs uncached behaviour too. If we
+use ASV's 'NEW' option, an uncached build will try every commit in the
+project's history. This seems OK as a default, but should be overridable
+somehow, e.g. with a build input. Some possibilities include:
+
+ - 'starting_commit' which gives the commit ID we should benchmark from.
+ - 'commit_count' which only benchmarks this many previous commits
+ - Some way of specifying 'all'
+
+Thinking about it, 'commit_count' seems to be the most useful. If we
+care about a specific commit, we can easily count backwards to some
+starting commit and ask for that many; likewise if we want them all. In
+the case that we don't care about a specific commit, we can either
+default to e.g. the last 10, or use a cached build to accumulate them
+all.
+
+Another thing to consider is not using Hydra for this. However, if we're
+going to have a single machine running Hydra *and* benchmarking, I'd
+rather have the benchmarks managed by Hydra. It would, of course, be
+nice to have a dedicated benchmarking machine which runs a single 'main
+loop':
+
+ - For each project
+  - Git pull
+  - If we have new commits
+   - asv run NEW
+   - asv publish
+  - Sleep 60
+
+OK, brain dump over. What are the actionables?
+
+ - Add a new input "cacheDir", defaulting to null
+ - Add a new input "commitCount", defaulting to 10
+ - If cacheDir is given, copy results out of there before running
+ - If cacheDir is given, copy new results into there after running
+ - If cacheDir is given, copy benchmarks.json into there after running,
+   if it differs, and to a hashed copy in a different dir
+ - If commitCount is given, run asv with a range argument taking that
+   into account. Looks like '@{10}' specifies the 10th ancestor on the
+   current branch (@{0} would be the current HEAD). We need to make this
+   a range, so we can use '@{10}..'. Note that there are two off-by-one
+   effects going on, which "cancel out": @{10} is the 11th commit, in
+   reverse chronological order. Yet the range 'foo..bar' excludes 'foo'
+   and its ancestors. Hence we include 10 commits :)
+ - If commitCount is null, use NEW.
