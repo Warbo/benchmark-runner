@@ -286,8 +286,9 @@ with rec {
   run = with pkgs; runCommand "run-benchmarks-${sanitiseName repo}"
     (withNix {
       inherit cacheDir cacheResults dir runner setupCache;
-      commitCount = if isInt commitCount then toString commitCount else null;
-      buildInputs = [ bash asv-nix fail jq ];
+      buildInputs    = [ bash asv-nix fail jq ];
+      commitCount    = if isInt commitCount then toString commitCount else null;
+      GIT_SSL_CAINFO = "${cacert}/etc/ssl/certs/ca-bundle.crt";
     })
     ''
       shopt -s nullglob
