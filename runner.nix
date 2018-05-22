@@ -254,30 +254,43 @@ with rec {
         '';
     };
     withDeps [ test ] go;
+
+  runner = pkgs.writeScript "benchmark-runner.sh" ''
+    #!/usr/bin/env bash
+    set -e
+
+    # Real values taken from a Thinkpad X60s
+    echo "Generating machine config" 1>&2
+    asv machine --arch    "i686"                                           \
+                --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz" \
+                --machine "dummy"                                          \
+                --os      "Linux 4.4.52"                                   \
+                --ram     "3093764"
+
+    # Default to everything since last run (which is all, for uncached)
+    RANGE="NEW"
+    if [[ -n "$commitCount" ]]
+    then
+      # @{N} is the Nth ancestor of current branch (0 would be HEAD)
+      # foo..bar is bar and ancestors, excluding foo and ancestors
+      RANGE="@{$commitCount}..HEAD"
+    fi
+
+    echo "Running asv on range $RANGE" 1>&2
+    asv run --show-stderr --machine dummy "$RANGE"
+
+    echo "Starting asv publish" 1>&2
+    asv publish
+  '';
+
   run = with pkgs; runCommand "run-benchmarks-${sanitiseName repo}"
     (withNix {
-      inherit dir;
+      inherit cacheDir cacheResults dir runner setupCache;
+      commitCount = if isInt commitCount then toString commitCount else null;
       buildInputs = [ bash asv-nix fail jq ];
-      runner      = writeScript "benchmark-runner.sh" ''
-        #!/usr/bin/env bash
-        set -e
-
-        # Real values taken from a Thinkpad X60s
-        echo "Generating machine config" 1>&2
-        asv machine --arch    "i686"                                           \
-                    --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz" \
-                    --machine "dummy"                                          \
-                    --os      "Linux 4.4.52"                                   \
-                    --ram     "3093764"
-
-        echo "Starting asv run" 1>&2
-        asv run --show-stderr --machine dummy
-
-        echo "Starting asv publish" 1>&2
-        asv publish
-      '';
     })
     ''
+      shopt -s nullglob
       export HOME="$PWD/home"
       mkdir "$HOME"
 
