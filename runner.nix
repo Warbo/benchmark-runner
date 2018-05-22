@@ -304,6 +304,24 @@ with rec {
       do
         FOUND=1
         pushd "$(dirname "$F")"
+          echo "Reading config" 1>&2
+          CONFIG=$(grep -v '^ *//' < "$F")
+
+          RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
+          RESULTS="$PWD/.asv/results"
+
+          HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
+          HTML="$PWD/.asv/html"
+
+          export RESULTS
+          export HTML
+
+          DIR="/nowhere"
+          if [[ -n "$cacheDir" ]]
+          then
+            DIR=$(echo "$CONFIG" | "$setupCache")
+          fi
+
           if [[ -e shell.nix ]] || [[ -e default.nix ]]
           then
             echo "Running asv in nix-shell" 1>&2
@@ -312,17 +330,15 @@ with rec {
             echo "No shell.nix or default.nix found, running asv 'bare'" 1>&2
             "$runner"
           fi
+
+          [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found, aborting"
+          [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found, aborting"
+
+          if [[ -n "$cacheDir" ]]
+          then
+            "$cacheResults"
+          fi
         popd
-
-        echo "Finding output" 1>&2
-        CONFIG=$(grep -v '^ *//' < "$F")
-        RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
-        RESULTS="$PWD/.asv/results"
-           HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
-           HTML="$PWD/.asv/html"
-
-        [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found, aborting"
-        [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found, aborting"
 
         mkdir "$out"
         cp -r "$RESULTS" "$out"/results
