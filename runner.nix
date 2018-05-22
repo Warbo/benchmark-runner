@@ -1,4 +1,8 @@
-{ repo ? abort "No repo URL given" }:
+{
+  cacheDir    ? null,
+  commitCount ? 10,
+  repo        ? abort "No repo URL given"
+}:
 
 with builtins;
 with rec {
