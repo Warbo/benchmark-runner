@@ -1,0 +1,8 @@
+From: Chris Warburton
+Date: Tue, 22 May 2018 17:52:35 +0100
+Subject: Re: Allow results to be cached
+Message-Id: <869b7ad3f5764670-92adb9f6e0e555a0-artemis@nixos>
+References: <869b7ad3f5764670-0-artemis@nixos>
+In-Reply-To: <869b7ad3f5764670-0-artemis@nixos>
+
+Added, with unit tests. We'll see how it pans out...

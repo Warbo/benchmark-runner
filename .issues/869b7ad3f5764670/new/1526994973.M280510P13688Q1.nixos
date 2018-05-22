@@ -1,8 +1,9 @@
 From: Chris Warburton
 Date: Tue, 22 May 2018 13:19:13 +0100
-State: new
+State: resolved
 Subject: Allow results to be cached
 Message-Id: <869b7ad3f5764670-0-artemis@nixos>
+resolution: fixed
 
 ASV's use-case is that we have a single clone, which we use e.g. a cron
 job to 'git --pull' and 'asv run NEW'. This doesn't quite fit with our
