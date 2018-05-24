@@ -1,6 +1,6 @@
 {
   cacheDir    ? null,
-  commitCount ? 10,
+  commitCount ? 10,  # Sane default prevents big repos going crazy
   repo        ? abort "No repo URL given"
 }:
 

@@ -22,25 +22,56 @@ with rec {
           --os      "Linux 4.4.52"                                    \
           --ram     "3093764"
 
-        # Default to everything since last run (which is all, for uncached)
+        # We run benchmarks from a function, so we can retry in some failure
+        # cases
+        function runBenchmarks {
+          echo "Running asv on range $1" 1>&2
+          TOO_FEW_MSG="unknown revision or path not in the working tree"
+          if O=$(asv run --show-stderr --machine dummy "$1" 2>&1 |
+                 tee >(cat 1>&2))
+          then
+            # Despite asv exiting successfully, we might have still hit a git
+            # rev-parse failure
+            echo "$O" | grep 'asv.util.ProcessError:' > /dev/null || return 0
+            echo "Spotted ProcessError from asv run, investigating..." 1>&2
+
+            echo "$O" | grep "$TOO_FEW_MSG" > /dev/null ||
+              fail "Don't know how to handle this error, aborting"
+            echo "Looks like we asked for too many commits, going to retry" 1>&2
+          fi
+
+          # Handle failures based on their error messages: some are benign
+          if echo "$O" | grep 'No commit hashes selected' > /dev/null
+          then
+            # This happens when everything's already in the cache
+            echo "No commits needed benchmarking, so asv run bailed out" 1>&2
+          fi
+          if echo "$O" | grep "$TOO_FEW_MSG" > /dev/null
+          then
+            echo "Asked to benchmark '$commitCount' commits, but there"    1>&2
+            echo "aren't that many on the branch. Retrying without limit." 1>&2
+            runBenchmarks "HEAD" || fail "Retry attempt failed"
+            return 0
+          fi
+
+          fail "asv run failed, and it wasn't for lack of commits"
+        }
+
+        # Default to everything since last run (which is all, for uncached);
+        # override by giving a commitCount.
         RANGE="NEW"
         if [[ -n "$commitCount" ]]
         then
-          # @{N} is the Nth ancestor of current branch (0 would be HEAD)
-          # foo..bar is bar and ancestors, excluding foo and ancestors
-          RANGE="@{$commitCount}..HEAD"
+          # Include HEAD and ancestors, exclude 'commitCount'th ancestor and its
+          # ancestors.
+          # NOTE: This will die if there are fewer than commitCount ancestors,
+          # which we handle in the runBenchmarks function.
+          # NOTE: We only talk about commits (HEAD and ancestors), rather than
+          # branches, since nixpkgs's fetchgit function messes with .git, which
+          # can delete branch information (specifically, the branch head refs)
+          RANGE="HEAD~$commitCount..HEAD"
         fi
-
-        echo "Running asv on range $RANGE" 1>&2
-        O=$(asv run --show-stderr --machine dummy "$RANGE" |
-            tee >(cat 1>&2)) || {
-          if echo "$O" | grep 'No commit hashes selected' > /dev/null
-          then
-            echo "No commits needed benchmarking, so asv run bailed out" 1>&2
-          else
-            fail "asv run failed, and it wasn't for lack of commits"
-          fi
-        }
+        runBenchmarks "$RANGE" || fail "Failed to run benchmarks"
 
         echo "Starting asv publish" 1>&2
         asv publish
@@ -189,12 +220,48 @@ with rec {
         FOUND=1
       done < <(find cache -type d -name "*-test")
       [[ "$FOUND" -eq 1 ]] || fail "Didn't find cached result"
-
+      unset FOUND
       rm -rf results html
+
       dir="$PWD/project" cacheDir="$PWD/cache" "$go" ||
         fail "Didn't work with populated cache"
       [[ -e results ]] || fail "No results when cached"
       [[ -e html    ]] || fail "No html when cached"
+      rm -rf results html
+
+      dir="$PWD/project" commitCount=1 "$go" ||
+        fail "Didn't work with a commitCount"
+      [[ -e results ]] || fail "No results with commitCount"
+      [[ -e html    ]] || fail "No html with commitCount"
+      FOUND=0
+      for F in results/dummy/*.json
+      do
+        echo "$F" | grep 'machine.json' > /dev/null && continue
+        FOUND=$(( FOUND + 1 ))
+      done
+      [[ "$FOUND" -eq 1 ]] || {
+        find results 1>&2
+        fail "commitCount 1 should only benchmark 1 commit"
+      }
+      unset FOUND
+      rm -rf results html
+
+      dir="$PWD/project" commitCount=5 "$go" ||
+        fail "Didn't work with too-high commitCount"
+      [[ -e results ]] || fail "No results with too-high commitCount"
+      [[ -e html    ]] || fail "No html with too-high commitCount"
+      FOUND=0
+      for F in results/dummy/*.json
+      do
+        echo "$F" | grep 'machine.json' > /dev/null && continue
+        FOUND=$(( FOUND + 1 ))
+      done
+      [[ "$FOUND" -eq 2 ]] || {
+        find results 1>&2
+        fail "Too-high commitCount should have benchmarked both commits"
+      }
+      unset FOUND
+      rm -rf results html
 
       mkdir "$out"
     '';

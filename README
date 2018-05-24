@@ -1,6 +1,6 @@
 # ASV Benchmark Runner #
 
-The Nix derivation in `runner.nix` allows a Git repository to be benchmarked
+The Nix derivation in `default.nix` allows a Git repository to be benchmarked
 using Airspeed Velocity (ASV). This is useful for continuous integration, since
 normally we will only get a single Git revision (to aid reproducibility, Nix
 deletes the `.git` directory by default), whilst ASV wants access to all of the
@@ -8,6 +8,40 @@ commits in order to benchmark them.
 
 ## Usage ##
 
-The URL (remote or local) of the desired Git repository should be given either
-as a `REPO` environment variable, or as a `<repo>` parameter (set via the
-`NIX_PATH` environment variable, or via Hydra build inputs).
+The `default.nix` file defines a function. This should be called with an attrset
+of arguments, including a `repo` attribute containing the URL (remote or local)
+of the desired Git repository. This can be done "manually", or if you're on
+Hydra by setting it as a build input.
+
+Other arguments are optional, and include:
+
+ - `commitCount` is the number of commits (ancestors of `HEAD`, inclusive) to
+   run benchmarks for. If `null` is given, the range `NEW` will be used, which
+   causes ASV to look for the latest benchmark result (if any) and benchmark all
+   commits since then. Note that `null` may require a crazy amount of work, if
+   there are thousands of commits. For this reason we default to `10`.
+ - `cacheDir` defaults to `null`. If a string is given, we will treat it as a
+   path and copy existing results from there into our ASV results directory, so
+   that they don't get re-run. Any new benchmark results get copied into the
+   `cacheDir` after we're finished.
+
+## Notes on Caching ##
+
+Using a cache can be a huge performance gain, especially when benchmarking the
+same repos over and over (e.g. a build server watching for new commits). However
+it also makes our derivations impure. It's up to you whether that's worth it.
+
+Many repo's results can co-exist in the same cache, since we identify them by
+hashing the relevant ASV config file. This means that changing the config file
+will cause old commits to be benchmarked from scratch. Whilst this may be
+inconvenient in some circumstances (e.g. if the benchmarks haven't changed, and
+there are thousands of existing results), we consider this behaviour to be
+reasonable since it is *simple* and *predictable*. If you want to re-use results
+in a "smarter" way (AKA more complicated/fragile/confusing/etc.), feel free to
+write your own scripts to copy the cache contents around.
+
+Note that you should probably avoid giving a Nix *path* value
+(e.g. `/tmp/cache`) as a `cacheDir` argument, and should almost always use a Nix
+*string* value instead (e.g. `"/tmp/cache"`). This is because Nix copies path
+values to its store, and passes those immutable copies to the build scripts.
+This would prevent new results getting copied to the cache.
