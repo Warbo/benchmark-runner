@@ -1,0 +1,7 @@
+From: Chris Warburton
+Date: Thu, 24 May 2018 16:02:46 +0100
+State: new
+Subject: Test commit count
+Message-Id: <81811f8f9d38762c-0-artemis@nixos>
+
+We're not yet testing commit count

@@ -1,408 +1,202 @@
-{
-  cacheDir    ? null,
-  commitCount ? 10,
-  repo        ? abort "No repo URL given"
-}:
-
+pkgs:
 with builtins;
+with pkgs;
 with rec {
-  pinnedConfig = (import <nixpkgs> { config = {}; }).fetchgit {
-    url    = http://chriswarbo.net/git/nix-config.git;
-    rev    = "fd0535c";
-    sha256 = "1ag9r7q1wnlz26s4h4q85ggy2bvj2s4nx6n0g1m40qirxqmnyj47";
-  };
-
-  configSrc = with tryEval <nix-config>;
-              if success
-                 then value
-                 else pinnedConfig;
-
-  pkgs = import configSrc {};
-
-  dir = pkgs.latestGit {
-    url         = repo;
-    deepClone   = true;  # Get all revisions, not just latest
-    leaveDotGit = true;  # .git is deleted by default, for reproducibility
-    stable      = { unsafeSkip = true; };  # Always get latest revision
-  };
-
-  # Copies data out of cache, setting up new cache if needed
-  setupCache =
-    with pkgs;
-    with rec {
-      go = wrap {
-        name  = "setupCache.sh";
-        paths = [ bash fail jq ];
-        vars  = {
-          readme      = writeScript "cacheDir-README" ''
-            # Cache for benchmark-runner #
-
-            See http://chriswarbo.net/git/benchmark-runner
-
-            This directory stores benchmark descriptions and results for asv
-            benchmarks, keyed by hash. Move/delete these to force a re-run of
-            those benchmarks. Use this path as 'cacheDir' to make use of them.
-            This should be a world-writable directory.
-          '';
-        };
-        script = ''
-          #!/usr/bin/env bash
-          set -e
-
-          [[ -n "$cacheDir" ]] || fail "No cacheDir given"
-
-          CONFIG=$(cat)
-          [[ -n "$CONFIG"   ]] || fail "No config on stdin"
-
-          echo "$CONFIG" | jq -e 'has("project")' > /dev/null ||
-            fail "No 'project' key in config"
-
-          PROJECT=$(echo "$CONFIG" | jq -r '.project' | tr -d '/') ||
-            fail "Couldn't read 'project' from config:\n$CONFIG\n"
-
-          [[ -n "$RESULTS" ]] || fail "No RESULTS dir given"
-
-          [[ -d "$cacheDir" ]] || {
-            echo "Creating new cacheDir '$cacheDir'" 1>&2
-            mkdir -p "$cacheDir"
-            mkdir -p "$cacheDir"
-            chmod 777 -R "$cacheDir"
-            cp "$readme" "$cacheDir/README"
-          }
-
-          SHASUM=$(echo "$CONFIG" | ${getSha})
-          DIR="$cacheDir/$SHASUM-$PROJECT"
-
-          [[ -d "$DIR" ]] || {
-            echo "Creating cache for '$PROJECT' at '$DIR'" 1>&2
-            mkdir -p "$DIR/results"
-            mkdir -p "$DIR/benchmark-jsons"
-            chmod 777 -R "$DIR"
-          }
-
-          NAME=$(dirname "$RESULTS")
-          echo "Copying initial results (if any) from '$DIR' to '$RESULTS'" 1>&2
-          [[ -e "$NAME" ]] || mkdir "$NAME"
-          cp -rv "$DIR/results" "$NAME/" 1>&2
-          chmod 777 -R "$RESULTS"
-
-          echo "$DIR"
-        '';
-      };
-
-      test = runCommand "setupCache-test.sh"
-        {
-          inherit go;
-          buildInputs = [ fail jq ];
-        }
-        ''
-          O=$(echo "" | RESULTS="/nowhere" "$go" 2>&1) &&
-            fail "Should've failed without cacheDir\n$O"
-
-          export cacheDir="$PWD/cacheDir"
-
-          JSON='{"project": "test"}'
-          O=$(echo "$JSON" | "$go" 2>&1) &&
-            fail "Should fail without RESULTS\n$O"
-
-          export RESULTS="$PWD/results"
-
-          O=$(               "$go" 2>&1) && fail "Didn't spot no input\n$O"
-          O=$(echo "(foo)" | "$go" 2>&1) && fail "Didn't spot non-JSON\n$O"
-          O=$(echo "{}"    | "$go" 2>&1) && fail "Didn't need 'project'\n$O"
-
-          [[ -d "$cacheDir" ]] && fail "Shouldn't make dirs when aborting"
-          [[ -d "$RESULTS"  ]] && fail "Shouldn't copy dirs when aborting"
-          echo "$JSON" | "$go" || fail "Shouldn't fail with project"
-          [[ -d "$cacheDir" ]] || fail "Should have made cache dir"
-          [[ -d "$RESULTS"  ]] || fail "Should have made results dir"
-
-          shopt -s nullglob
-          FOUND=0
-          DIRNAME=""
-          for D in "$cacheDir"/*-test
-          do
-            FOUND=1
-            DIRNAME="$D"
-          done
-          [[ "$FOUND" -eq 1 ]] || fail "Should have made project dir"
-          CONFHASH=$(echo "$JSON" | ${getSha})
-          DIR="$cacheDir/$CONFHASH-test"
-          [[ -e "$DIR" ]] ||
-            fail "Name should be hash '$DIR', got '$DIRNAME'"
-          unset DIRNAME
-
-          mkdir "$DIR/results/machine"
-          echo "foo" > "$DIR/results/machine/bar"
-          echo "$JSON" | "$go" || fail "Shouldn't fail with cache"
-
-          [[ -e "$RESULTS/machine/bar" ]] || {
-            echo "Content of RESULTS ($RESULTS)" 1>&2
-            find "$RESULTS" 1>&2
-            fail "Should have copied cache"
-          }
-          GOT=$(cat "$RESULTS/machine/bar")
-          [[ "x$GOT" = "xfoo" ]] || fail "Data wasn't copied"
-
-          mkdir "$out"
-        '';
-    };
-    withDeps [ test ] go;
-
-  getSha = "sha256sum | cut -d ' ' -f1";
-
-  # Writes new results to cache
-  cacheResults =
-    with pkgs;
-    with rec {
-      go = wrap {
-        name   = "cacheResults.sh";
-        paths  = [ bash fail ];
-        script = ''
-          #!/usr/bin/env bash
-          set -e
-
-          [[ -n "$DIR"     ]] || fail "No DIR given"
-          [[ -e "$DIR"     ]] || fail "DIR '$DIR' doesn't exist"
-          [[ -n "$RESULTS" ]] || fail "No RESULTS given"
-          [[ -e "$RESULTS" ]] || fail "RESULTS dir '$RESULTS' doesn't exist"
-
-          [[ -e "$DIR/results"         ]] || mkdir "$DIR/results"
-          [[ -e "$DIR/benchmark-jsons" ]] || mkdir "$DIR/benchmark-jsons"
-
-          echo "Copying results (if any) to cache '$DIR'" 1>&2
-          for D in "$RESULTS"/*
-          do
-            if [[ -d "$D" ]]
-            then
-              NAME=$(basename "$D")
-              [[ -e "$DIR/results/$NAME" ]] || {
-                cp -rv "$D" "$DIR/results/"
-              }
-              for X in "$D"/*
-              do
-                XNAME=$(basename "$X")
-                [[ -e "$DIR/results/$NAME/$XNAME" ]] ||
-                  cp -rv "$X" "$DIR/results/$NAME/"
-              done
-            fi
-          done
-
-          EXIST="$DIR/results/benchmarks.json"
-          EXISTHASH="nope"
-          [[ -e "$EXIST" ]] &&
-            EXISTHASH=$(cat "$EXIST" | ${getSha})
-
-          BENCH="$RESULTS/benchmarks.json"
-          BENCHHASH=$(cat "$BENCH" | ${getSha})
-          [[ "x$EXISTHASH" = "x$BENCHHASH" ]] || cp -v "$BENCH" "$EXIST"
-
-          TOMAKE="$DIR/benchmark-jsons/$BENCHHASH-benchmarks.json"
-          [[ -e "$TOMAKE" ]] || cp -v "$BENCH" "$TOMAKE"
-
-          chmod 777 -R "$DIR" || true
-        '';
-      };
-
-      test = runCommand "testCacheResults"
-        {
-          inherit go;
-          buildInputs  = [ fail ];
-        }
-        ''
-          O=$(                                 "$go" 2>&1) &&
-            fail "Should've failed without DIR\n$O"
-          O=$(DIR="/nowhere"                   "$go" 2>&1) &&
-            fail "Should've failed without RESULTS\n$O"
-          O=$(DIR="/nowhere" RESULTS="/nowhen" "$go" 2>&1) &&
-            fail "Should've failed with nonexistent DIR\n$O"
-
-          export DIR="$PWD/dir"
-          mkdir "$DIR"
-          O=$(RESULTS="/nowhen" "$go" 2>&1) &&
-            fail "Should've failed with nonexistent RESULTS\n$O"
-
-          export RESULTS="$PWD/results"
-          mkdir "$RESULTS"
-          O=$("$go" 2>&1) && fail "Should require benchmarks.json\n$O"
-
-          echo "dummy" > "$RESULTS/benchmarks.json"
-          "$go" || fail "Should've succeeded with benchmarks.json"
-
-          [[ -e "$DIR/results/benchmarks.json" ]] ||
-            fail "Should copy benchmarks.json"
-          GOT=$(cat "$DIR/results/benchmarks.json")
-          [[ "x$GOT" = "xdummy" ]] || fail "Expected 'dummy', got '$GOT'"
-          unset GOT
-
-          BENCHHASH=$(echo "dummy" | ${getSha})
-          BENCH="$DIR/benchmark-jsons/$BENCHHASH-benchmarks.json"
-          [[ -e "$BENCH" ]] || fail "No hashed benchmarks.json found"
-          GOT=$(cat "$BENCH")
-          [[ "x$GOT" = "xdummy" ]] || fail "Hashed should be 'dummy' not '$GOT'"
-          unset GOT
-
-          mkdir "$RESULTS/machine"
-          echo "foo" > "$RESULTS/machine/bar"
-          "$go"
-          [[ -e "$DIR/results/machine/bar" ]] || fail "No results/machine/bar"
-
-          GOT=$(cat "$DIR/results/machine/bar")
-          [[ "x$GOT" = "xfoo" ]] || fail "Expected 'foo' result, not '$GOT'"
-
-          mkdir "$out"
-        '';
-    };
-    withDeps [ test ] go;
-
-  runner = pkgs.writeScript "benchmark-runner.sh" ''
-    #!/usr/bin/env bash
-    set -e
-
-    # Real values taken from a Thinkpad X60s
-    echo "Generating machine config" 1>&2
-    asv machine --arch    "i686"                                           \
-                --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz" \
-                --machine "dummy"                                          \
-                --os      "Linux 4.4.52"                                   \
-                --ram     "3093764"
-
-    # Default to everything since last run (which is all, for uncached)
-    RANGE="NEW"
-    if [[ -n "$commitCount" ]]
-    then
-      # @{N} is the Nth ancestor of current branch (0 would be HEAD)
-      # foo..bar is bar and ancestors, excluding foo and ancestors
-      RANGE="@{$commitCount}..HEAD"
-    fi
-
-    echo "Running asv on range $RANGE" 1>&2
-    asv run --show-stderr --machine dummy "$RANGE"
-
-    echo "Starting asv publish" 1>&2
-    asv publish
-  '';
-
-  run = with pkgs; runCommand "run-benchmarks-${sanitiseName repo}"
-    (withNix {
-      inherit cacheDir cacheResults dir runner setupCache;
-      buildInputs    = [ bash asv-nix fail jq ];
-      commitCount    = if isInt commitCount then toString commitCount else null;
+  go = wrap {
+    name  = "benchmark-runner";
+    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail jq nix.out ];
+    vars  = withNix {
+      inherit (import ./cache.nix pkgs) cacheResults setupCache;
+      asvNix         = asv-nix;
       GIT_SSL_CAINFO = "${cacert}/etc/ssl/certs/ca-bundle.crt";
-    })
-    ''
-      shopt -s nullglob
-      export HOME="$PWD/home"
-      mkdir "$HOME"
+      runner         = pkgs.writeScript "benchmark-runner.sh" ''
+        #!/usr/bin/env bash
+        set -e
 
-      echo "Making mutable copy of '$dir' to benchmark" 1>&2
-      cp -r "$dir" ./src
-      chmod +w -R ./src
-      cd ./src
+        # Real values taken from a Thinkpad X60s
+        echo "Generating machine config" 1>&2
+        asv machine                                                   \
+          --arch    "i686"                                            \
+          --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz"  \
+          --machine "dummy"                                           \
+          --os      "Linux 4.4.52"                                    \
+          --ram     "3093764"
 
-      FOUND=0
-      while read -r F
-      do
-        FOUND=1
-        pushd "$(dirname "$F")"
-          echo "Reading config" 1>&2
-          CONFIG=$(grep -v '^ *//' < "$F")
+        # Default to everything since last run (which is all, for uncached)
+        RANGE="NEW"
+        if [[ -n "$commitCount" ]]
+        then
+          # @{N} is the Nth ancestor of current branch (0 would be HEAD)
+          # foo..bar is bar and ancestors, excluding foo and ancestors
+          RANGE="@{$commitCount}..HEAD"
+        fi
 
-          RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
-          RESULTS="$PWD/.asv/results"
-
-          HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
-          HTML="$PWD/.asv/html"
-
-          export RESULTS
-          export HTML
-
-          DIR="/nowhere"
-          if [[ -n "$cacheDir" ]]
+        echo "Running asv on range $RANGE" 1>&2
+        O=$(asv run --show-stderr --machine dummy "$RANGE" |
+            tee >(cat 1>&2)) || {
+          if echo "$O" | grep 'No commit hashes selected' > /dev/null
           then
-            DIR=$(echo "$CONFIG" | "$setupCache")
-          fi
-
-          if [[ -e shell.nix ]] || [[ -e default.nix ]]
-          then
-            echo "Running asv in nix-shell" 1>&2
-            nix-shell --show-trace --run "$runner"
+            echo "No commits needed benchmarking, so asv run bailed out" 1>&2
           else
-            echo "No shell.nix or default.nix found, running asv 'bare'" 1>&2
-            "$runner"
+            fail "asv run failed, and it wasn't for lack of commits"
           fi
+        }
 
-          [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found, aborting"
-          [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found, aborting"
+        echo "Starting asv publish" 1>&2
+        asv publish
+      '';
+    };
+    script = ''
+      #!/usr/bin/env bash
+      set   -e
+      shopt -s nullglob
 
-          if [[ -n "$cacheDir" ]]
-          then
-            "$cacheResults"
-          fi
+      [[ -n "$dir" ]] || fail "No 'dir' given"
+
+      GOT=0
+      while read -r F; do GOT=1; done < <(find "$dir" -name 'asv.conf.json')
+      [[ "$GOT" -eq 1 ]] || fail "No asv.conf.json found"
+      unset GOT
+
+      TEMPDIR=$(mktemp -d --tmpdir "benchmark-runner-temp-XXXXX")
+      function cleanUp {
+        rm -rf "$TEMPDIR"
+      }
+      trap cleanUp EXIT
+      pushd "$TEMPDIR"
+
+        export HOME="$PWD/home"
+        mkdir "$HOME"
+
+        echo "Making mutable copy of '$dir' to benchmark" 1>&2
+        cp -r "$dir" ./src
+        chmod +w -R  ./src
+
+        pushd ./src
+          while read -r F
+          do
+            pushd "$(dirname "$F")"
+              echo "Reading config" 1>&2
+              CONFIG=$(grep -v '^ *//' < "$F")
+
+              RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
+              RESULTS="$PWD/.asv/results"
+              RESULTS=$(readlink -f "$RESULTS")
+
+              HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
+              HTML="$PWD/.asv/html"
+              HTML=$(readlink -f "$HTML")
+
+              export RESULTS
+              export HTML
+
+              DIR="/nowhere"
+              [[ -z "$cacheDir" ]] || DIR=$(echo "$CONFIG" | "$setupCache")
+
+              if [[ -e shell.nix ]] || [[ -e default.nix ]]
+              then
+                echo "Running asv in nix-shell" 1>&2
+                nix-shell --show-trace --run "$runner"
+              else
+                echo "No nix-shell file found, running asv 'bare'" 1>&2
+                "$runner"
+              fi
+
+              [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found"
+              [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found"
+
+              export DIR
+              [[ -z "$cacheDir" ]] || "$cacheResults"
+            popd
+            break
+          done < <(find . -name 'asv.conf.json')
         popd
-
-        mkdir "$out"
-        cp -r "$RESULTS" "$out"/results
-        cp -r "$HTML"    "$out"/html
-      done < <(find . -name 'asv.conf.json')
-
-      [[ "$FOUND" -eq 1 ]] || fail "No asv.conf.json found"
+      popd
+      mv "$RESULTS" ./results
+      mv "$HTML"    ./html
     '';
+  };
 
-  results = with pkgs; runCommand "benchmark-results-${sanitiseName repo}"
-    { inherit run; }
-    ''ln -s "$run/results" "$out"'';
-
-  html = with pkgs; runCommand "benchmark-pages-${sanitiseName repo}"
+  test = runCommand "benchmark-runner-test"
     {
-      inherit run;
-      buildInputs = [ replace ];
-      htmlInliner = import (fetchgit {
-        url    = http://chriswarbo.net/git/html-inliner.git;
-        rev    = "d24cca4";
-        sha256 = "14y4w7l41j9sb7bfgjzidq89wgzhkwxvkgq5wb7qnqjfqcyygi63";
-      });
-      pre1  = "url: 'regressions.json',";
-      post1 = ''
-        url: 'regressions.json',
-        beforeSend: function(xhr){
-          if (xhr.overrideMimeType) {
-            xhr.overrideMimeType("application/json");
-          }
-        },
-      '';
-      pre2  = ''dataType: "json",'';
-      post2 = ''
-        dataType: "json",
-        beforeSend: function(xhr){
-          if (xhr.overrideMimeType) {
-            xhr.overrideMimeType("application/json");
-          }
-        },
-      '';
+      inherit go;
+      buildInputs = [ fail git jq ];
+      project     = attrsToDirs {
+        "asv.conf.json" = writeScript "example-asv.conf.json" (toJSON {
+          benchmark_dir = "b"; branches = [ "master" ]; builders = {};
+          dvcs = "git"; env_dir = "e"; environment_type = "nix"; html_dir = "h";
+          installer = "x: import (x.root + \"/x.nix\")"; matrix = {};
+          plugins = [ "asv_nix" ]; project = "test"; repo = ".";
+          results_dir = "r"; version = 1;
+        });
+        b = { "__init__.py" = writeScript "empty" "";
+              "x.py" = writeScript "x.py" ''def track_x(): return 42''; };
+        "x.nix" = writeScript "dummy" ''
+          (import <nixpkgs> {}).runCommand "env" {} ${"''"}
+            mkdir -p "$out/bin"
+            ln -s "${python}/bin/python" "$out/bin/python"
+          ${"''"}
+        '';
+      };
     }
     ''
-      cp -r "$run"/html ./result
-      chmod +w -R       ./result
+      export HOME="$PWD/home"
+      mkdir "$HOME"
+      git config --global user.email "you@example.com"
+      git config --global user.name  "Your Name"
 
-      echo "Fixing up HTML" 1>&2
-      find "$PWD/result" -name "*.html" | while read -r F
+      O=$("$go" 2>&1) && fail "Shouldn't succeed with no dir\n$O"
+
+      function makeGit {
+        pushd project
+          git init .
+          git add -A
+          git commit -m "Initial commit"
+          sed -e 's/42/24/g' -i b/x.py
+          git add b/x.py
+          git commit -m "Swap number"
+        popd
+      }
+
+      cp -r "$project" project
+      chmod +w -R project
+      makeGit project
+      dir="$PWD/project" "$go" || fail "Didn't benchmark bare project"
+      [[ -e results ]]         || fail "No results dir found when bare"
+      [[ -e html    ]]         || fail "No html dir found when bare"
+      rm -rf results html project
+
+      cp -r "$project" project
+      chmod +w -R project
+      mv project/x.nix project/default.nix
+      sed -e 's@/x.nix@@g' -i project/asv.conf.json
+      makeGit project
+      dir="$PWD/project" "$go" || fail "Didn't benchmark nix-shell project"
+      [[ -e results ]]         || fail "No results dir found when nix-shell"
+      [[ -e html    ]]         || fail "No html dir found when nix-shell"
+      rm -rf results html
+
+      dir="$PWD/project" cacheDir="$PWD/cache" "$go" ||
+        fail "Didn't work with empty cache"
+
+      [[ -e cache   ]] || fail "No cache dir made"
+      [[ -e results ]] || fail "No results made when caching"
+      [[ -e html    ]] || fail "No html made when cachine"
+
+      FOUND=0
+      while read -r D
       do
-         CONTENT=$(cat "$F")
-             DIR=$(dirname "$F")
-        export BASE_URL="file://$DIR"
-        echo "$CONTENT" | "$htmlInliner" > "$F"
-      done
+        FOUND=1
+      done < <(find cache -type d -name "*-test")
+      [[ "$FOUND" -eq 1 ]] || fail "Didn't find cached result"
 
-      echo "Fixing MIME types" 1>&2
-      find ./result -name "*.js" | while read -r F
-      do
-        replace "$pre1" "$post1" -- "$F"
-        replace "$pre2" "$post2" -- "$F"
-      done
+      rm -rf results html
+      dir="$PWD/project" cacheDir="$PWD/cache" "$go" ||
+        fail "Didn't work with populated cache"
+      [[ -e results ]] || fail "No results when cached"
+      [[ -e html    ]] || fail "No html when cached"
 
-      mv ./result "$out"
-      echo "Done" 1>&2
+      mkdir "$out"
     '';
 };
-{ inherit html results; }
+withDeps [ test ] go
