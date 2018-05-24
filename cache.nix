@@ -22,7 +22,8 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
         };
         script = ''
           #!/usr/bin/env bash
-          set -e
+          set   -e
+          shopt -s nullglob
 
           [[ -n "$cacheDir" ]] || fail "No cacheDir given"
 
@@ -138,7 +139,8 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
         paths  = [ bash fail ];
         script = ''
           #!/usr/bin/env bash
-          set -e
+          set   -e
+          shopt -s nullglob
 
           [[ -n "$DIR"     ]] || fail "No DIR given"
           [[ -e "$DIR"     ]] || fail "DIR '$DIR' doesn't exist"

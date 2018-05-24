@@ -171,6 +171,8 @@ with rec {
       };
     }
     ''
+      shopt -s nullglob
+
       export HOME="$PWD/home"
       mkdir "$HOME"
       git config --global user.email "you@example.com"
