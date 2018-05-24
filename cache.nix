@@ -61,7 +61,10 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
           [[ -e "$NAME" ]] || mkdir -p "$NAME"
           if [[ -e "$RESULTS" ]]
           then
-            cp -rv "$DIR/results"/* "$RESULTS"/ 1>&2
+            for X in "$DIR/results"/*
+            do
+              cp -rv "$X" "$RESULTS"/ 1>&2
+            done
           else
             cp -rv "$DIR/results"   "$RESULTS"  1>&2
           fi
