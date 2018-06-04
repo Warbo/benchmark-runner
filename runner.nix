@@ -6,6 +6,7 @@ with rec {
     name  = "benchmark-runner";
     paths = [ (python.withPackages (p: [ asv-nix ])) bash fail jq nix.out ];
     vars  = withNix {
+      inherit htmlFixer;
       inherit (import ./cache.nix pkgs) cacheResults setupCache;
       asvNix         = asv-nix;
       GIT_SSL_CAINFO = "${cacert}/etc/ssl/certs/ca-bundle.crt";
@@ -136,6 +137,8 @@ with rec {
               [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found"
               [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found"
 
+              "$htmlFixer" "$HTML"
+
               export DIR
               [[ -z "$cacheDir" ]] || "$cacheResults"
             popd
@@ -145,6 +148,60 @@ with rec {
       popd
       mv "$RESULTS" ./results
       mv "$HTML"    ./html
+    '';
+  };
+
+  htmlFixer = wrap {
+    name  = "htmlFixer";
+    paths = [ bash fail replace ];
+    vars  = {
+      htmlInliner = import (fetchgit {
+        url    = http://chriswarbo.net/git/html-inliner.git;
+        rev    = "d24cca4";
+        sha256 = "14y4w7l41j9sb7bfgjzidq89wgzhkwxvkgq5wb7qnqjfqcyygi63";
+      });
+      pre1  = "url: 'regressions.json',";
+      post1 = ''
+        url: 'regressions.json',
+        beforeSend: function(xhr){
+          if (xhr.overrideMimeType) {
+            xhr.overrideMimeType("application/json");
+          }
+        },
+      '';
+      pre2  = ''dataType: "json",'';
+      post2 = ''
+        dataType: "json",
+        beforeSend: function(xhr){
+          if (xhr.overrideMimeType) {
+            xhr.overrideMimeType("application/json");
+          }
+        },
+      '';
+    };
+    script = ''
+      #!/usr/bin/env bash
+      set -e
+
+      [[ -n "$1" ]] || fail "No HTML dir given"
+
+      echo "Fixing up HTML" 1>&2
+      find "$1" -name "*.html" | while read -r F
+      do
+         CONTENT=$(cat     "$F")
+             DIR=$(dirname "$F")
+        export BASE_URL="file://$DIR"
+        echo "$CONTENT" | "$htmlInliner" > "$F"
+      done
+
+      echo "Fixing MIME types" 1>&2
+      find "$1" -name "*.js" | while read -r F
+      do
+        replace "$pre1" "$post1" -- "$F"
+        replace "$pre2" "$post2" -- "$F"
+      done
+
+      echo "Done" 1>&2
     '';
   };
 
