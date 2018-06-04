@@ -149,9 +149,12 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
           [[ -e "$DIR"     ]] || fail "DIR '$DIR' doesn't exist"
           [[ -n "$RESULTS" ]] || fail "No RESULTS given"
           [[ -e "$RESULTS" ]] || fail "RESULTS dir '$RESULTS' doesn't exist"
+          [[ -n "$HTML"    ]] || fail "No HTML given"
+          [[ -e "$HTML"    ]] || fail "HTML dir '$HTML' doesn't exist"
 
           [[ -e "$DIR/results"         ]] || mkdir "$DIR/results"
           [[ -e "$DIR/benchmark-jsons" ]] || mkdir "$DIR/benchmark-jsons"
+          [[ -e "$DIR/html"            ]] || mkdir "$DIR/html"
 
           echo "Copying results (if any) to cache '$DIR'" 1>&2
           for D in "$RESULTS"/*
@@ -183,6 +186,16 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
           TOMAKE="$DIR/benchmark-jsons/$BENCHHASH-benchmarks.json"
           [[ -e "$TOMAKE" ]] || cp -v "$BENCH" "$TOMAKE"
 
+          echo "Copying HTML to cache '$DIR'" 1>&2
+          HTML_VERSION=$(( RANDOM ))
+          cp -rv "$HTML" "$DIR/html/$HTML_VERSION"
+
+          echo "Atomically updating 'latest' symlink to '$HTML_VERSION'..." 1>&2
+          pushd "$DIR/html/$HTML_VERSION" > /dev/null
+            ln -s "$HTML_VERSION" latest
+            mv latest ../  # Atomic overwrite
+          popd > /dev/null
+
           chmod 777 -R "$DIR" || true
         '';
       };
@@ -210,7 +223,15 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
           O=$("$go" 2>&1) && fail "Should require benchmarks.json\n$O"
 
           echo "dummy" > "$RESULTS/benchmarks.json"
-          "$go" || fail "Should've succeeded with benchmarks.json"
+          O=$("$go" 2>&1) && fail "Should fail without HTML\n$O"
+
+          O=$(HTML="/nowhere" "$go" 2>&1) &&
+            fail "Should fail with non-existent HTML\n$O"
+
+          export HTML="$PWD/html"
+          mkdir "$HTML"
+          echo "indexen" > "$HTML/index.html"
+          "$go" || fail "Should've succeeded with HTML"
 
           [[ -e "$DIR/results/benchmarks.json" ]] ||
             fail "Should copy benchmarks.json"
@@ -225,6 +246,31 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
           [[ "x$GOT" = "xdummy" ]] || fail "Hashed should be 'dummy' not '$GOT'"
           unset GOT
 
+          FOUND=0
+          NAME=""
+          for X in "$DIR"/html/*
+          do
+            MAYBE_NAME=$(basename "$X")
+            [[ "x$MAYBE_NAME" = "xlatest" ]] && continue
+            NAME="$MAYBE_NAME"
+            unset MAYBE_NAME
+
+            [[ -d "$X" ]] || fail "HTML '$X' should be dir"
+            FOUND=$(( FOUND + 1 ))
+          done
+          [[ "$FOUND" -eq 1        ]] || fail "Found '$FOUND' HTML dirs, not 1"
+          [[ -n "$NAME"            ]] || fail "No HTML dir name found"
+          [[ -h "$DIR/html/latest" ]] || fail "No 'latest' HTML symlink found"
+
+          GOT=$(readlink "$DIR/html/latest")
+          [[ "x$GOT" = "x$NAME" ]] || fail "Latest was '$GOT' not '$NAME'"
+          unset GOT
+
+          [[ -e "$DIR/html/latest/index.html" ]] || fail "Should've copied HTML"
+          GOT=$(cat "$DIR/html/latest/index.html")
+          [[ "x$GOT" = "xindexen" ]] || fail "Should be 'indexen' not '$GOT'"
+
+          echo "replacement" > "$HTML/index.html"
           mkdir "$RESULTS/machine"
           echo "foo" > "$RESULTS/machine/bar"
           "$go"
@@ -232,6 +278,11 @@ with pkgs // { getSha = "sha256sum | cut -d ' ' -f1"; };
 
           GOT=$(cat "$DIR/results/machine/bar")
           [[ "x$GOT" = "xfoo" ]] || fail "Expected 'foo' result, not '$GOT'"
+          unset GOT
+
+          [[ -e "$DIR/html/latest/index.html" ]] || fail "No replacement HTML"
+          GOT=$(cat "$DIR/html/latest/index.html")
+          [[ "x$GOT" = "xreplacement" ]] || fail "Should replace, got '$GOT'"
 
           mkdir "$out"
         '';
