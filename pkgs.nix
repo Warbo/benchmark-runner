@@ -1,13 +1,23 @@
 with rec {
-  pinnedConfig = (import <nixpkgs> { config = {}; }).fetchgit {
-    url    = http://chriswarbo.net/git/nix-config.git;
-    rev    = "84c4dce";
-    sha256 = "01adg4yblj5m15qmkq60nycd9d28aa789j28hs2wb34c79lpbi4w";
+  pkgs = import <nixpkgs> {};
+
+  nix-helpers = pkgs.fetchgit {
+    url    = http://chriswarbo.net/git/nix-helpers.git;
+    rev    = "72d9d88";
+    sha256 = "1kggqr07dz2widv895wp8g1x314lqg19p67nzr3b97pg97amhjsi";
   };
 
-  configSrc = with builtins.tryEval <nix-config>;
-              if success
-                 then value
-                 else pinnedConfig;
+  warbo-packages = pkgs.fetchgit {
+    url    = http://chriswarbo.net/git/warbo-packages.git;
+    rev    = "fadf087";
+    sha256 = "0z4jk3wk9lhlq3njr22wsr9plf5fw7mmpbky8l8ppn0gp698vq63";
+  };
+
+  repo = (import <nixpkgs> {
+    overlays = [ (import "${nix-helpers}/overlay.nix" ) ];
+  }).repo1803;
 };
-import configSrc {}
+import repo {
+  overlays = [ (import "${nix-helpers}/overlay.nix")
+               (import "${warbo-packages}/overlay.nix") ];
+}
