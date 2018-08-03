@@ -141,11 +141,11 @@ with rec {
         popd
         break
       done < <(find . -name 'asv.conf.json')
-      popd
-      popd
 
       if [[ -z "$BENCHMARK_IN_PLACE" ]]
       then
+        popd
+        popd
         mv "$RESULTS" ./results
         mv "$HTML"    ./html
       fi
