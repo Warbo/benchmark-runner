@@ -15,22 +15,15 @@ with rec {
         #!/usr/bin/env bash
         set -e
 
-        # Real values taken from a Thinkpad X60s
         echo "Generating machine config" 1>&2
-        asv machine                                                   \
-          --arch    "i686"                                            \
-          --cpu     "Genuine Intel(R) CPU          L2400  @ 1.66GHz"  \
-          --machine "dummy"                                           \
-          --os      "Linux 4.4.52"                                    \
-          --ram     "3093764"
+        asv machine --yes
 
         # We run benchmarks from a function, so we can retry in some failure
         # cases
         function runBenchmarks {
           echo "Running asv on range $1" 1>&2
           TOO_FEW_MSG="unknown revision or path not in the working tree"
-          if O=$(asv run --show-stderr --machine dummy "$1" 2>&1 |
-                 tee >(cat 1>&2))
+          if O=$(asv run --show-stderr "$1" 2>&1 | tee >(cat 1>&2))
           then
             # Despite asv exiting successfully, we might have still hit a git
             # rev-parse failure
