@@ -294,14 +294,14 @@ with rec {
       [[ -e results ]] || fail "No results with commitCount"
       [[ -e html    ]] || fail "No html with commitCount"
       FOUND=0
-      for F in results/dummy/*.json
+      for F in results/*/*.json
       do
         echo "$F" | grep 'machine.json' > /dev/null && continue
         FOUND=$(( FOUND + 1 ))
       done
       [[ "$FOUND" -eq 1 ]] || {
         find results 1>&2
-        fail "commitCount 1 should only benchmark 1 commit"
+        fail "commitCount 1 should only benchmark 1 commit (found $FOUND)"
       }
       unset FOUND
       rm -rf results html
@@ -311,14 +311,14 @@ with rec {
       [[ -e results ]] || fail "No results with too-high commitCount"
       [[ -e html    ]] || fail "No html with too-high commitCount"
       FOUND=0
-      for F in results/dummy/*.json
+      for F in results/*/*.json
       do
         echo "$F" | grep 'machine.json' > /dev/null && continue
         FOUND=$(( FOUND + 1 ))
       done
       [[ "$FOUND" -eq 2 ]] || {
         find results 1>&2
-        fail "Too-high commitCount should have benchmarked both commits"
+        fail "Too-high commitCount should benchmark both commits (found $FOUND)"
       }
       unset FOUND
       rm -rf results html
