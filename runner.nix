@@ -84,64 +84,71 @@ with rec {
       [[ "$GOT" -eq 1 ]] || fail "No asv.conf.json found"
       unset GOT
 
-      TEMPDIR=$(mktemp -d --tmpdir "benchmark-runner-temp-XXXXX")
-      function cleanUp {
-        rm -rf "$TEMPDIR"
-      }
-      trap cleanUp EXIT
-      pushd "$TEMPDIR"
+      if [[ -z "$BENCHMARK_IN_PLACE" ]]
+      then
+        TEMPDIR=$(mktemp -d --tmpdir "benchmark-runner-temp-XXXXX")
+        function cleanUp {
+          rm -rf "$TEMPDIR"
+        }
+        trap cleanUp EXIT
+        pushd "$TEMPDIR"
 
-        export HOME="$PWD/home"
-        mkdir "$HOME"
+          export HOME="$PWD/home"
+          mkdir "$HOME"
 
-        echo "Making mutable copy of '$dir' to benchmark" 1>&2
-        cp -r "$dir" ./src
-        chmod +w -R  ./src
+          echo "Making mutable copy of '$dir' to benchmark" 1>&2
+          cp -r "$dir" ./src
+          chmod +w -R  ./src
 
-        pushd ./src
-          while read -r F
-          do
-            pushd "$(dirname "$F")"
-              echo "Reading config" 1>&2
-              CONFIG=$(grep -v '^ *//' < "$F")
+          pushd ./src
+      fi
+      while read -r F
+      do
+        pushd "$(dirname "$F")"
+          echo "Reading config" 1>&2
+          CONFIG=$(grep -v '^ *//' < "$F")
 
-              RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
-              RESULTS="$PWD/.asv/results"
-              RESULTS=$(readlink -f "$RESULTS")
+          RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
+          RESULTS="$PWD/.asv/results"
+          RESULTS=$(readlink -f "$RESULTS")
 
-              HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
-              HTML="$PWD/.asv/html"
-              HTML=$(readlink -f "$HTML")
+          HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
+          HTML="$PWD/.asv/html"
+          HTML=$(readlink -f "$HTML")
 
-              export RESULTS
-              export HTML
+          export RESULTS
+          export HTML
 
-              DIR="/nowhere"
-              [[ -z "$cacheDir" ]] || DIR=$(echo "$CONFIG" | "$setupCache")
+          DIR="/nowhere"
+          [[ -z "$cacheDir" ]] || DIR=$(echo "$CONFIG" | "$setupCache")
 
-              if [[ -e shell.nix ]] || [[ -e default.nix ]]
-              then
-                echo "Running asv in nix-shell" 1>&2
-                nix-shell --show-trace --run "$runner"
-              else
-                echo "No nix-shell file found, running asv 'bare'" 1>&2
-                "$runner"
-              fi
+          if [[ -e shell.nix ]] || [[ -e default.nix ]]
+          then
+            echo "Running asv in nix-shell" 1>&2
+            nix-shell --show-trace --run "$runner"
+          else
+            echo "No nix-shell file found, running asv 'bare'" 1>&2
+            "$runner"
+          fi
 
-              [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found"
-              [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found"
+          [[ -e "$RESULTS" ]] || fail "No results ($RESULTS) found"
+          [[ -e "$HTML"    ]] || fail "No HTML ($HTML) found"
 
-              "$htmlFixer" "$HTML"
+          "$htmlFixer" "$HTML"
 
-              export DIR
-              [[ -z "$cacheDir" ]] || "$cacheResults"
-            popd
-            break
-          done < <(find . -name 'asv.conf.json')
+          export DIR
+          [[ -z "$cacheDir" ]] || "$cacheResults"
         popd
+        break
+      done < <(find . -name 'asv.conf.json')
       popd
-      mv "$RESULTS" ./results
-      mv "$HTML"    ./html
+      popd
+
+      if [[ -z "$BENCHMARK_IN_PLACE" ]]
+      then
+        mv "$RESULTS" ./results
+        mv "$HTML"    ./html
+      fi
     '';
   };
 
