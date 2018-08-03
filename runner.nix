@@ -4,7 +4,8 @@ with pkgs;
 with rec {
   go = wrap {
     name  = "benchmark-runner";
-    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail jq nix.out ];
+    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail jq ] ++
+            (withNix {}).buildInputs;
     vars  = withNix {
       inherit htmlFixer;
       inherit (import ./cache.nix pkgs) cacheResults setupCache;
