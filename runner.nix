@@ -106,7 +106,7 @@ with rec {
       do
         pushd "$(dirname "$F")"
           echo "Reading config" 1>&2
-          CONFIG=$(grep -v '^ *//' < "$F")
+          CONFIG=$(grep -v '^ *//' < "$F") || true
 
           RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
           RESULTS="$PWD/.asv/results"
