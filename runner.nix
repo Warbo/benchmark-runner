@@ -106,21 +106,29 @@ with rec {
       do
         pushd "$(dirname "$F")"
           echo "Reading config" 1>&2
-          CONFIG=$(grep -v '^ *//' < "$F") || true
+          CONFIG=$(grep -v '^ *//' < "$F") || CONFIG=$(cat "$F")
 
           RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
           RESULTS="$PWD/.asv/results"
           RESULTS=$(readlink -f "$RESULTS")
+          echo "Using results dir '$RESULTS'" 1>&2
 
           HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
           HTML="$PWD/.asv/html"
           HTML=$(readlink -f "$HTML")
+          echo "Using HTML dir '$HTML'" 1>&2
 
           export RESULTS
           export HTML
 
           DIR="/nowhere"
-          [[ -z "$cacheDir" ]] || DIR=$(echo "$CONFIG" | "$setupCache")
+          if [[ -z "$cacheDir" ]]
+          then
+            echo "Not using an external cache" 1>&2
+          else
+            echo "Setting up external cache data" 1>&2
+            DIR=$(echo "$CONFIG" | "$setupCache")
+          fi
 
           if [[ -e shell.nix ]] || [[ -e default.nix ]]
           then
