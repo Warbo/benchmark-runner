@@ -105,11 +105,12 @@ with rec {
       while read -r F
       do
         pushd "$(dirname "$F")"
-          echo "Reading config" 1>&2
+          echo "Reading config file '$F'" 1>&2
           CONFIG=$(grep -v '^ *//' < "$F") || CONFIG=$(cat "$F")
 
           RESULTS=$(echo "$CONFIG" | jq -r '.results_dir') ||
           RESULTS="$PWD/.asv/results"
+          mkdir -p "$RESULTS"
           RESULTS=$(readlink -f "$RESULTS")
           echo "Using results dir '$RESULTS'" 1>&2
 
