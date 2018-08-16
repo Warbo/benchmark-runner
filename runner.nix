@@ -4,7 +4,7 @@ with pkgs;
 with rec {
   go = wrap {
     name  = "benchmark-runner";
-    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail jq ] ++
+    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail git jq ] ++
             (withNix {}).buildInputs;
     vars  = withNix {
       inherit htmlFixer;
