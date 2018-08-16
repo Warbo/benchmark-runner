@@ -116,6 +116,7 @@ with rec {
 
           HTML=$(echo "$CONFIG" | jq -r    '.html_dir') ||
           HTML="$PWD/.asv/html"
+          mkdir -p "$HTML"
           HTML=$(readlink -f "$HTML")
           echo "Using HTML dir '$HTML'" 1>&2
 
