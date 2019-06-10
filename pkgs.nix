@@ -3,21 +3,21 @@ with rec {
 
   nix-helpers = pkgs.fetchgit {
     url    = http://chriswarbo.net/git/nix-helpers.git;
-    rev    = "72d9d88";
-    sha256 = "1kggqr07dz2widv895wp8g1x314lqg19p67nzr3b97pg97amhjsi";
+    rev    = "027e227";
+    sha256 = "11niics6rq60zaicb6spkfpvp8nv3wszdfgpqnrml946p1bggy13";
   };
 
   warbo-packages = pkgs.fetchgit {
     url    = http://chriswarbo.net/git/warbo-packages.git;
-    rev    = "fadf087";
-    sha256 = "0z4jk3wk9lhlq3njr22wsr9plf5fw7mmpbky8l8ppn0gp698vq63";
+    rev    = "c7f83b8";
+    sha256 = "1cx2w518sxr4933dr548ichaljhcp0wvmbgyv3m56lmfk6fqdgzq";
   };
 
   repo = (import <nixpkgs> {
     overlays = [ (import "${nix-helpers}/overlay.nix" ) ];
   }).repo1803;
 };
-import repo {
-  overlays = [ (import "${nix-helpers}/overlay.nix")
-               (import "${warbo-packages}/overlay.nix") ];
-}
+import repo { overlays = [
+  (import "${  nix-helpers }/overlay.nix")
+  (import "${warbo-packages}/overlay.nix")
+]; }

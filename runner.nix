@@ -4,73 +4,77 @@ with pkgs;
 with rec {
   go = wrap {
     name  = "benchmark-runner";
-    paths = [ (python.withPackages (p: [ asv-nix ])) bash fail git jq ] ++
-            (withNix {}).buildInputs;
+    paths = [ bash fail jq ] ++ (withNix {}).buildInputs;
     vars  = withNix {
       inherit htmlFixer;
       inherit (import ./cache.nix pkgs) cacheResults setupCache;
-      asvNix         = asv-nix;
       GIT_SSL_CAINFO = "${cacert}/etc/ssl/certs/ca-bundle.crt";
-      runner         = pkgs.writeScript "benchmark-runner.sh" ''
-        #!/usr/bin/env bash
-        set -e
+      runner         = wrap {
+        name  = "benchmark-runner.sh";
+        paths = [
+          bash /*asv*/ asv-nix (python3.withPackages (p: [ asv-nix ])) fail git
+        ];
+        script = ''
+          #!/usr/bin/env bash
+          set -e
 
-        echo "Generating machine config" 1>&2
-        asv machine --yes
+          echo "Generating machine config" 1>&2
+          asv machine --yes
 
-        # We run benchmarks from a function, so we can retry in some failure
-        # cases
-        function runBenchmarks {
-          echo "Running asv on range $1" 1>&2
-          TOO_FEW_MSG="unknown revision or path not in the working tree"
-          if O=$(asv run --show-stderr "$1" 2>&1 | tee >(cat 1>&2))
+          # We run benchmarks from a function, so we can retry in some failure
+          # cases
+          function runBenchmarks {
+            echo "Running asv on range $1" 1>&2
+            TOO_FEW_MSG="unknown revision or path not in the working tree"
+            if O=$(asv run --show-stderr "$1" 2>&1 | tee >(cat 1>&2))
+            then
+              # Despite asv exiting successfully, we might have still hit a git
+              # rev-parse failure
+              echo "$O" | grep 'asv.util.ProcessError:' > /dev/null || return 0
+              echo "Spotted ProcessError from asv run, investigating..." 1>&2
+
+              echo "$O" | grep "$TOO_FEW_MSG" > /dev/null ||
+                fail "Don't know how to handle this error, aborting"
+              echo "Looks like we asked for too many commits, going to retry" 1>&2
+            fi
+
+            # Handle failures based on their error messages: some are benign
+            if echo "$O" | grep 'No commit hashes selected' > /dev/null
+            then
+              # This happens when everything's already in the cache
+              echo "No commits needed benchmarking, so asv run bailed out" 1>&2
+            fi
+            if echo "$O" | grep "$TOO_FEW_MSG" > /dev/null
+            then
+              echo "Asked to benchmark '$commitCount' commits, but there"    1>&2
+              echo "aren't that many on the branch. Retrying without limit." 1>&2
+              runBenchmarks "HEAD" || fail "Retry attempt failed"
+              return 0
+            fi
+
+            fail "asv run failed, and it wasn't for lack of commits"
+          }
+
+          # Default to everything since last run (which is all, for uncached);
+          # override by giving a commitCount.
+          RANGE="NEW"
+          if [[ -n "$commitCount" ]]
           then
-            # Despite asv exiting successfully, we might have still hit a git
-            # rev-parse failure
-            echo "$O" | grep 'asv.util.ProcessError:' > /dev/null || return 0
-            echo "Spotted ProcessError from asv run, investigating..." 1>&2
-
-            echo "$O" | grep "$TOO_FEW_MSG" > /dev/null ||
-              fail "Don't know how to handle this error, aborting"
-            echo "Looks like we asked for too many commits, going to retry" 1>&2
+            # Include HEAD and ancestors, exclude 'commitCount'th ancestor and its
+            # ancestors.
+            # NOTE: This will die if there are fewer than commitCount ancestors,
+            # which we handle in the runBenchmarks function.
+            # NOTE: We only talk about commits (HEAD and ancestors), rather than
+            # branches, since nixpkgs's fetchgit function messes with .git, which
+            # can delete branch information (specifically, the branch head refs)
+            RANGE="HEAD~$commitCount..HEAD"
           fi
+          runBenchmarks "$RANGE" || fail "Failed to run benchmarks"
 
-          # Handle failures based on their error messages: some are benign
-          if echo "$O" | grep 'No commit hashes selected' > /dev/null
-          then
-            # This happens when everything's already in the cache
-            echo "No commits needed benchmarking, so asv run bailed out" 1>&2
-          fi
-          if echo "$O" | grep "$TOO_FEW_MSG" > /dev/null
-          then
-            echo "Asked to benchmark '$commitCount' commits, but there"    1>&2
-            echo "aren't that many on the branch. Retrying without limit." 1>&2
-            runBenchmarks "HEAD" || fail "Retry attempt failed"
-            return 0
-          fi
-
-          fail "asv run failed, and it wasn't for lack of commits"
-        }
-
-        # Default to everything since last run (which is all, for uncached);
-        # override by giving a commitCount.
-        RANGE="NEW"
-        if [[ -n "$commitCount" ]]
-        then
-          # Include HEAD and ancestors, exclude 'commitCount'th ancestor and its
-          # ancestors.
-          # NOTE: This will die if there are fewer than commitCount ancestors,
-          # which we handle in the runBenchmarks function.
-          # NOTE: We only talk about commits (HEAD and ancestors), rather than
-          # branches, since nixpkgs's fetchgit function messes with .git, which
-          # can delete branch information (specifically, the branch head refs)
-          RANGE="HEAD~$commitCount..HEAD"
-        fi
-        runBenchmarks "$RANGE" || fail "Failed to run benchmarks"
-
-        echo "Starting asv publish" 1>&2
-        asv publish
-      '';
+          echo "Starting asv publish" 1>&2
+          asv publish
+        '';
+      };
     };
     script = ''
       #!/usr/bin/env bash
@@ -219,6 +223,7 @@ with rec {
   test = runCommand "benchmark-runner-test"
     {
       inherit go;
+      __noChroot  = true;
       buildInputs = [ fail git jq ];
       project     = attrsToDirs {
         "asv.conf.json" = writeScript "example-asv.conf.json" (toJSON {
@@ -233,7 +238,7 @@ with rec {
         "x.nix" = writeScript "dummy" ''
           (import <nixpkgs> {}).runCommand "env" {} ${"''"}
             mkdir -p "$out/bin"
-            ln -s "${python}/bin/python" "$out/bin/python"
+            ln -s "${python3}/bin/python3" "$out/bin/python"
           ${"''"}
         '';
       };
